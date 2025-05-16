@@ -2,3 +2,5 @@ discord.py
 yt-dlp
 openai-whisper
 pyaudio
+PyNaCl
+torch

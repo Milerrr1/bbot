@@ -6,6 +6,8 @@ import asyncio
 import os
 import pyaudio
 import wave
+import uuid
+import torch
 from discord import FFmpegPCMAudio
 
 # Настройка бота
@@ -47,37 +49,51 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return cls(FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
 def record_audio():
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16,
-                    channels=1,
-                    rate=16000,
-                    input=True,
-                    frames_per_buffer=1024)
+    # Генерация уникального имени для временного файла
+    filename = f"temp_{uuid.uuid4().hex}.wav"
+
+    FORMAT = pyaudio.paInt16
+    CHANNELS = 1
+    RATE = 16000
+    CHUNK = 1024
+    RECORD_SECONDS = 5
+
+    audio = pyaudio.PyAudio()
+    stream = audio.open(format=FORMAT, channels=CHANNELS,
+                        rate=RATE, input=True,
+                        frames_per_buffer=CHUNK)
+
+    print("Запись начата...")
+
     frames = []
-    print("Recording...")
-    for _ in range(0, int(16000 / 1024 * 5)):  # 5 секунд
-        data = stream.read(1024)
+    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+        data = stream.read(CHUNK)
         frames.append(data)
-    print("Recording finished")
+
+    print("Запись завершена.")
+
     stream.stop_stream()
     stream.close()
-    p.terminate()
+    audio.terminate()
 
-    filename = "audio.wav"
     with wave.open(filename, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
-        wf.setframerate(16000)
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(audio.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
         wf.writeframes(b''.join(frames))
 
     return filename
 
+
 async def process_audio(ctx):
-    audio_file = record_audio()
+    loop = asyncio.get_running_loop()
+    audio_file = await loop.run_in_executor(None, record_audio)
+
     try:
-        result = whisper_model.transcribe(audio_file)
+        result = await loop.run_in_executor(None, lambda: whisper_model.transcribe(audio_file))
         text = result['text'].lower().strip()
         print(f"Распознано: {text}")
+
         if text:
             await handle_voice_command(ctx, text)
         else:
@@ -87,7 +103,6 @@ async def process_audio(ctx):
     finally:
         if os.path.exists(audio_file):
             os.remove(audio_file)
-
 async def handle_voice_command(ctx, text):
     if any(cmd in text for cmd in ["play", "включи", "проиграй"]):
         song_name = text
